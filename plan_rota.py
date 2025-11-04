@@ -1,12 +1,29 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from geopy.geocoders import Nominatim
-from geopy.exc import GeocoderTimedOut, GeocoderUnavailable
+from geopy.geocoders import OpenCage # Substitui Nominatim por OpenCage
+import time # Importa a biblioteca time para usar time.sleep
+from geopy.exc import GeocoderTimedOut, GeocoderUnavailable, GeocoderServiceError
 # Importa as funções do novo módulo do solver
 import solver_pulp
 from io import BytesIO
 
+
+@st.cache_data # Cacheia os resultados da geocodificação para evitar requisições repetidas
+def geocode_with_retry(_geolocator, address, retries=3, delay=2):
+    """
+    Tenta geocodificar um endereço com um número de tentativas e atraso.
+    Isso é crucial para ambientes de nuvem com limites de taxa.
+    """
+    for i in range(retries):
+        try:
+            return _geolocator.geocode(address, timeout=15)
+        except (GeocoderTimedOut, GeocoderUnavailable, GeocoderServiceError):
+            if i < retries - 1: # Se não for a última tentativa
+                time.sleep(delay * (i + 1)) # Aumenta o atraso a cada tentativa (2s, 4s, ...)
+            else: # Se for a última tentativa, retorna None
+                return None
+    return None
 
 def render(df_veiculos, df_itens):
     """
@@ -184,11 +201,13 @@ def render(df_veiculos, df_itens):
             # 3. Lógica de geocodificação na submissão do formulário
             if submitted and local:
                 try:
-                    geolocator = Nominatim(user_agent="chammas_route_planner")
-                    location = geolocator.geocode(local, timeout=10)
+                    # Inicializa o geolocator do OpenCage com a chave dos secrets
+                    api_key = st.secrets["opencage"]["api_key"]
+                    geolocator = OpenCage(api_key, user_agent="chammas_route_planner_v1")
+                    location = geocode_with_retry(geolocator, local)
                     
                     if not location:
-                        st.error(f"Endereço não encontrado: '{local}'. Por favor, tente ser mais específico (ex: 'Rua, Número, Cidade').")
+                        st.error(f"Endereço não encontrado para '{local}'. Verifique o endereço ou tente novamente.")
                         st.stop()
 
                     tarefas_adicionadas = 0
@@ -219,15 +238,12 @@ def render(df_veiculos, df_itens):
                             try:
                                 nome_item_base, peso_adicional = coletas_config[item_selecionado]
                                 peso_base = df_itens.loc[df_itens['Nomes Normalizados'] == nome_item_base, 'Peso (KG)'].iloc[0]
-                                # Busca o código do item base na coluna correta
-                                #st.write("df_itens.columns:", df_itens.columns)
-                                codigo_item_base = df_itens.loc[df_itens['Nomes Normalizados'] == nome_item_base, 'Código Mega'].iloc[0]
                                 peso_final = peso_base + peso_adicional
                                 nova_tarefa = {
                                     "Local": local, "Latitude": location.latitude, "Longitude": location.longitude, "Tipo_Operacao": "Coleta", 
                                     "Item": item_selecionado, "Quantidade": quantidade, "Peso_Unitario_kg": round(peso_final, 2),
                                     "Prioridade": prioridade_selecionada,
-                                    "Código": codigo_item_base # Armazena o código do item base
+                                    "Código": "N/A" # Coletas não possuem código de item
                                 }
                                 st.session_state.itens_planejamento.append(nova_tarefa)
                                 tarefas_adicionadas += 1
@@ -286,7 +302,9 @@ def render(df_veiculos, df_itens):
                 novas_tarefas = []
                 erros_importacao = []
                 geocoded_locations = {} # Cache para evitar geocodificar o mesmo local várias vezes
-                geolocator = Nominatim(user_agent="chammas_route_planner_batch")
+                # Inicializa o geolocator do OpenCage com a chave dos secrets
+                api_key = st.secrets["opencage"]["api_key"]
+                geolocator = OpenCage(api_key, user_agent="chammas_route_planner_batch_v1")
 
                 coletas_config = {
                     "Coleta de Testemunho": ("CAIXA PLÁSTICA DE TESTEMUNHO HQ/HWL – GERAÇÃO I", 3.0),
@@ -312,15 +330,15 @@ def render(df_veiculos, df_itens):
                         # 1. Geocodificação com cache
                         if local not in geocoded_locations:
                             try:
-                                location = geolocator.geocode(local, timeout=10)
+                                location = geocode_with_retry(geolocator, local) # A função de retry continua sendo usada
                                 geocoded_locations[local] = location
-                            except (GeocoderTimedOut, GeocoderUnavailable):
+                            except Exception: # Captura qualquer outra exceção inesperada
                                 erros_importacao.append(f"Linha {index + 2}: Falha na conexão com o serviço de geocodificação para o local '{local}'.")
                                 continue
                         
                         location = geocoded_locations[local]
                         if not location:
-                            erros_importacao.append(f"Linha {index + 2}: Endereço não encontrado para '{local}'.")
+                            erros_importacao.append(f"Linha {index + 2}: Endereço não encontrado ou serviço indisponível para '{local}'.")
                             continue
 
                         # 2. Validação e cálculo de peso
@@ -344,7 +362,7 @@ def render(df_veiculos, df_itens):
                                 erros_importacao.append(f"Linha {index + 2}: Item base '{nome_item_base}' para a coleta '{item}' não encontrado na base de dados.")
                                 continue
                             peso_unitario = item_data['Peso (KG)'].iloc[0] + peso_adicional
-                            codigo_item = item_data['Código Mega'].iloc[0]
+                            codigo_item = "N/A" # Coletas não possuem código de item
                         else:
                             erros_importacao.append(f"Linha {index + 2}: Tipo de Operação '{tipo_op}' inválido. Use 'Entrega' ou 'Coleta'.")
                             continue

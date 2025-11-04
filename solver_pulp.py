@@ -153,17 +153,6 @@ def preparar_dados_solver(df_veiculos_selecionados, df_planejamento, df_itens):
     else:
         r_max = 5 # Fallback para o caso de não haver capacidade
 
-    # --- Força a associação correta do Código Mega ao item ---
-    # Garante que a coluna 'Código' esteja presente e preenchida no df_planejamento
-    # antes de ser usada para criar o codigo_map no solver.
-    if 'Código' not in df_planejamento.columns or df_planejamento['Código'].isna().any():
-        df_merge = df_planejamento.merge(
-            df_itens[['Nomes Normalizados', 'Código Mega']],
-            left_on='Item',
-            right_on='Nomes Normalizados',
-            how='left'
-        )
-        df_planejamento['Código'] = df_merge['Código Mega']
     return {
         "nomes_locais": nomes_locais, "coordenadas": coordenadas, "matriz_distancia": matriz_distancia, "matriz_tempo": matriz_tempo,
         "veiculos": veiculos, "servicos_info": servicos_info, "compatibilidade": compatibilidade, "nos_demanda": nos_demanda, "R_max": int(r_max),

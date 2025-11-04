@@ -2,28 +2,11 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from geopy.geocoders import Nominatim
-import time # Importa a biblioteca time para usar time.sleep
-from geopy.exc import GeocoderTimedOut, GeocoderUnavailable, GeocoderServiceError
+from geopy.exc import GeocoderTimedOut, GeocoderUnavailable
 # Importa as funções do novo módulo do solver
 import solver_pulp
 from io import BytesIO
 
-
-@st.cache_data # Cacheia os resultados da geocodificação para evitar requisições repetidas
-def geocode_with_retry(geolocator, address, retries=3, delay=2):
-    """
-    Tenta geocodificar um endereço com um número de tentativas e atraso.
-    Isso é crucial para ambientes de nuvem com limites de taxa.
-    """
-    for i in range(retries):
-        try:
-            return geolocator.geocode(address, timeout=15) # Aumenta o timeout para 15 segundos
-        except (GeocoderTimedOut, GeocoderUnavailable, GeocoderServiceError):
-            if i < retries - 1: # Se não for a última tentativa
-                time.sleep(delay * (i + 1)) # Aumenta o atraso a cada tentativa (2s, 4s, ...)
-            else: # Se for a última tentativa, retorna None
-                return None
-    return None
 
 def render(df_veiculos, df_itens):
     """
@@ -201,13 +184,11 @@ def render(df_veiculos, df_itens):
             # 3. Lógica de geocodificação na submissão do formulário
             if submitted and local:
                 try:
-                    # Usa um user_agent único para sua aplicação
-                    geolocator = Nominatim(user_agent="chammas_route_planner_v1")
-                    # Usa a nova função com tentativas
-                    location = geocode_with_retry(geolocator, local)
+                    geolocator = Nominatim(user_agent="chammas_route_planner")
+                    location = geolocator.geocode(local, timeout=10)
                     
                     if not location:
-                        st.error(f"Endereço não encontrado para '{local}'. Verifique o endereço ou tente novamente.")
+                        st.error(f"Endereço não encontrado: '{local}'. Por favor, tente ser mais específico (ex: 'Rua, Número, Cidade').")
                         st.stop()
 
                     tarefas_adicionadas = 0
@@ -305,8 +286,7 @@ def render(df_veiculos, df_itens):
                 novas_tarefas = []
                 erros_importacao = []
                 geocoded_locations = {} # Cache para evitar geocodificar o mesmo local várias vezes
-                # Usa um user_agent único para sua aplicação
-                geolocator = Nominatim(user_agent="chammas_route_planner_batch_v1")
+                geolocator = Nominatim(user_agent="chammas_route_planner_batch")
 
                 coletas_config = {
                     "Coleta de Testemunho": ("CAIXA PLÁSTICA DE TESTEMUNHO HQ/HWL – GERAÇÃO I", 3.0),
@@ -332,16 +312,15 @@ def render(df_veiculos, df_itens):
                         # 1. Geocodificação com cache
                         if local not in geocoded_locations:
                             try:
-                                # Usa a nova função com tentativas
-                                location = geocode_with_retry(geolocator, local)
+                                location = geolocator.geocode(local, timeout=10)
                                 geocoded_locations[local] = location
-                            except Exception: # Captura qualquer outra exceção inesperada
+                            except (GeocoderTimedOut, GeocoderUnavailable):
                                 erros_importacao.append(f"Linha {index + 2}: Falha na conexão com o serviço de geocodificação para o local '{local}'.")
                                 continue
                         
                         location = geocoded_locations[local]
                         if not location:
-                            erros_importacao.append(f"Linha {index + 2}: Endereço não encontrado ou serviço indisponível para '{local}'.")
+                            erros_importacao.append(f"Linha {index + 2}: Endereço não encontrado para '{local}'.")
                             continue
 
                         # 2. Validação e cálculo de peso

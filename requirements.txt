@@ -7,3 +7,4 @@ matplotlib
 gspread
 google-auth-oauthlib
 oauth2client
+openpyxl

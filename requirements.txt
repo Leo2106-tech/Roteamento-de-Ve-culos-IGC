@@ -2,9 +2,10 @@ streamlit
 pandas
 numpy
 geopy
-pulp
 matplotlib
 gspread
 google-auth-oauthlib
 oauth2client
 openpyxl
+pulp
+highspy

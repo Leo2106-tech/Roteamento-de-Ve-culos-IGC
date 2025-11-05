@@ -420,7 +420,7 @@ def render(df_veiculos, df_itens):
         # Calcula e adiciona a coluna 'Capacidade (Slots)' ao DataFrame principal
         # --- NOVA LÓGICA DE SLOTS PARA VEÍCULOS (PARA O SOLVER) ---
         slots_vol_solver = np.floor(((df_veiculos_selecionados['Volume (Litros)'] / 1000) / SLOT_VOLUME_PADRAO)).fillna(0)
-        slots_peso_solver = np.floor(((df_veiculos_selecionados['Peso (Capacidade de carga)'] * 1000 - 100) / SLOT_PESO_PADRAO)).fillna(0)
+        slots_peso_solver = np.floor(((df_veiculos_selecionados['Peso (Capacidade de carga)'] * 1000 - 150) / SLOT_PESO_PADRAO)).fillna(0)
         
         # A capacidade final é a média dos dois, arredondada para baixo.
         df_veiculos_selecionados['Capacidade (Slots)'] = np.floor((slots_vol_solver + slots_peso_solver) / 2).astype(int)

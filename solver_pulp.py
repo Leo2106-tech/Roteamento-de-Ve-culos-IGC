@@ -6,7 +6,7 @@ import matplotlib.dates as mdates
 import matplotlib.patches as mpatches
 from datetime import datetime, timedelta, time
 from geopy.distance import geodesic
-from pulp import HiGHS_CMD
+
 
 def preparar_dados_solver(df_veiculos_selecionados, df_planejamento, df_itens):
     """
@@ -605,8 +605,12 @@ def executar_solver(df_veiculos_selecionados, df_planejamento, df_itens, final_d
     # --- Fim das restrições ---
     # --- RESOLUÇÃO COM HIGHS ---
     time_limit = 600 # 10 minutos
-    solver = HiGHS_CMD(msg=True, timeLimit=time_limit)
-    model.solve(solver)
+    try:
+        solver = pulp.HiGHS(msg=True, timeLimit=time_limit)
+        model.solve(solver)
+    except:
+        solver = pulp.PULP_CBC_CMD(msg=True, timeLimit=600)
+        model.solve(solver)
 
     # --- PROCESSAMENTO DOS RESULTADOS ---
     resultados = {
@@ -619,7 +623,7 @@ def executar_solver(df_veiculos_selecionados, df_planejamento, df_itens, final_d
 
     # Define o "Momento Zero" da operação
     # Deve ser definido aqui para ser usado tanto no roteiro de texto quanto no Gantt
-    data_inicio_operacao = datetime.now().replace(hour=5, minute=30, second=0, microsecond=0)
+    data_inicio_operacao = (datetime.now() + timedelta(days=1)).replace(hour=5, minute=30, second=0, microsecond=0)
     # Formato de data/hora para o texto
     dt_format_str = '%d/%m/%Y %H:%M'
 

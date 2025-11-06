@@ -611,6 +611,39 @@ def executar_solver(df_veiculos_selecionados, df_planejamento, df_itens, final_d
     except:
         solver = pulp.PULP_CBC_CMD(msg=True, timeLimit=600)
         model.solve(solver)
+    # --- Debug pós-solve: verificar violações de capacidade e uso de viagens ---
+    print(">>>> DEBUG pós-solve: verificar cargas por veículo/viagem e variáveis relevantes")
+    violacoes = []
+    for k in K:
+        for r in R:
+            # soma das entregas (em slots) feitas por k na viagem r
+            carga_total = 0.0
+            for (s,n,kk,rr) in f_indices:
+                if kk == k and rr == r:
+                    carga_total += (Slots[s] * f[(s,n,k,r)].value()) if f[(s,n,k,r)].value() is not None else 0.0
+            # valor de Q_slots
+            q = Q_slots[k]
+            if carga_total is None: carga_total = 0.0
+            print(f"Veículo {k} viagem {r} -> carga_total_slots = {carga_total} / Q_slots = {q}")
+            if carga_total > q + 1e-9:
+                violacoes.append((k, r, carga_total, q))
+
+    # imprimir F por arco se quiser auditar sequência (opcional para poucos arcos)
+    print("Valores não-zero de F (alguns):")
+    count_print = 0
+    for (i,j,k,r) in F_indices:
+        val = F[(i,j,k,r)].value()
+        if val and val > 1e-6:
+            print(f"  F[{i},{j},{k},{r}] = {val}")
+            count_print += 1
+            if count_print > 50: break
+
+    if violacoes:
+        print(">>> VIOLAÇÕES ENCONTRADAS:")
+        for v in violacoes:
+            print(f" Veículo {v[0]} viagem {v[1]}: carga {v[2]} > Q {v[3]}")
+    else:
+        print("Nenhuma violação detectada nas somas por viagem.")
 
     # --- PROCESSAMENTO DOS RESULTADOS ---
     resultados = {

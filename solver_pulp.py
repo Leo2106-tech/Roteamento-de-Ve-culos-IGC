@@ -352,7 +352,7 @@ def executar_solver(df_veiculos_selecionados, df_planejamento, df_itens, final_d
     # M_tempo: usado em restrições de sequenciamento temporal
     M_tempo = max(
         t[i][j] + ST[i]
-        for i in N for j in N
+        for i in V for j in V
         if i != j
     ) + 5  # margem pequena
 
@@ -923,4 +923,5 @@ def executar_solver(df_veiculos_selecionados, df_planejamento, df_itens, final_d
     return resultados
 
 # Renomeia a função principal para corresponder à chamada em plan_rota.py
+
 run_optimization = executar_solver

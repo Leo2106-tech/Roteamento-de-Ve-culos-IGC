@@ -138,6 +138,16 @@ def preparar_dados_solver(df_veiculos_selecionados, df_planejamento, df_itens):
                 volume_unitario = item_dim['comprimento'] * item_dim['largura'] * item_dim['altura']
                 regra2 = ((veiculo_row['CATEGORIA'] in ['CAMINHONETE', 'PICKUP']) and
                           (peso_unitario * volume_unitario) < 2.068)
+                
+                    # --- DEBUG ---
+                print(f"--- DEBUG COMPATIBILIDADE ---")
+                print(f"Veículo: {veiculo_id} ({veiculo_row['CATEGORIA']})")
+                print(f"Item: {item_id}")
+                print(f"Dim Item (sorted): {dim_item_sorted}")
+                print(f"Dim Veículo (sorted): {dim_veiculo_sorted}")
+                print(f"Regra 1 (Cabe?): {regra1}")
+                print(f"Regra 2 (Exceção Pickup?): {regra2}")
+                # --- FIM DEBUG ---
 
                 compatibilidade[veiculo_id, item_id] = 1 if regra1 or regra2 else 0
             else:
@@ -368,7 +378,7 @@ def executar_solver(df_veiculos_selecionados, df_planejamento, df_itens, final_d
     M_atraso = max(DL.values()) + M_tempo
 
     # M_operacao: usado em T_total e ativações (U[k])
-    M_operacao = M_tempo * len(N)  # tempo máximo possível de operação
+    M_operacao = M_tempo * len(V)  # tempo máximo possível de operação
 
     # --- Exibir para conferência ---
     print("Big-M dinâmicos definidos:")
@@ -428,13 +438,18 @@ def executar_solver(df_veiculos_selecionados, df_planejamento, df_itens, final_d
         if P.get(k, 1) == 0 and Demanda.get((s, n), 0) < 0:
             model += f[(s, n, k, r)] == 0
 
-    # 2) Itens longos: no máximo 4 unidades do mesmo item por veículo por viagem (s,k,r)
-    #    (aplica-se por (s,k,r) -> permite que o mesmo veículo transporte mais em outra viagem r+1 se P[k]=1)
+    # 2) Itens longos: no máximo 4 unidades do CONJUNTO de itens longos por veículo por viagem (k,r).
     if itens_longos:
-        for s in itens_longos:
-            for k in K:
-                for r in R:
-                    model += pulp.lpSum(f[(s, n, k, r)] for n in N if (s, n, k, r) in f) <= 4
+        for k in K:
+            for r in R:
+                # Soma a quantidade de TODOS os itens longos transportados nesta viagem por este veículo
+                total_itens_longos_viagem = pulp.lpSum(
+                    f[(s, n, k, r)]
+                    for s in itens_longos
+                    for n in N
+                    if (s, n, k, r) in f
+                )
+                model += total_itens_longos_viagem <= 4, f"Limite_Itens_Longos_{k}_{r}"
 
     # Capacidade por arco (F ligado a X) - garante que nenhum arco carregue mais slots que Q_slots quando usado
     for (i, j, k, r) in F_indices:
@@ -923,5 +938,4 @@ def executar_solver(df_veiculos_selecionados, df_planejamento, df_itens, final_d
     return resultados
 
 # Renomeia a função principal para corresponder à chamada em plan_rota.py
-
 run_optimization = executar_solver

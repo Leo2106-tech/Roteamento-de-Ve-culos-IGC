@@ -105,7 +105,7 @@ def render(df_veiculos, df_itens):
         # Arredondamento para baixo em todas as etapas
         slots_vol = np.floor(((df_veiculos_selecionados_info['Volume (Litros)'] / 1000) / SLOT_VOLUME_PADRAO)).fillna(0)
         # Subtrai 100kg da capacidade de peso antes de fracionar
-        slots_peso = np.floor(((df_veiculos_selecionados_info['Peso (Capacidade de carga)'] * 1000 - 150) / SLOT_PESO_PADRAO)).fillna(0)
+        slots_peso = np.floor(((df_veiculos_selecionados_info['Peso (Capacidade de carga)'] * 1000) / SLOT_PESO_PADRAO)).fillna(0)
         
         # A capacidade final é a média dos dois, arredondada para baixo.
         df_veiculos_selecionados_info['Capacidade (Slots)'] = np.floor((slots_vol + slots_peso) / 2).astype(int)
@@ -420,7 +420,7 @@ def render(df_veiculos, df_itens):
         # Calcula e adiciona a coluna 'Capacidade (Slots)' ao DataFrame principal
         # --- NOVA LÓGICA DE SLOTS PARA VEÍCULOS (PARA O SOLVER) ---
         slots_vol_solver = np.floor(((df_veiculos_selecionados['Volume (Litros)'] / 1000) / SLOT_VOLUME_PADRAO)).fillna(0)
-        slots_peso_solver = np.floor(((df_veiculos_selecionados['Peso (Capacidade de carga)'] * 1000 - 150) / SLOT_PESO_PADRAO)).fillna(0)
+        slots_peso_solver = np.floor(((df_veiculos_selecionados['Peso (Capacidade de carga)'] * 1000) / SLOT_PESO_PADRAO)).fillna(0)
         
         # A capacidade final é a média dos dois, arredondada para baixo.
         df_veiculos_selecionados['Capacidade (Slots)'] = np.floor((slots_vol_solver + slots_peso_solver) / 2).astype(int)

@@ -176,7 +176,7 @@ def preparar_dados_solver(df_veiculos_selecionados, df_planejamento, df_itens):
 
     if min_capacidade_veiculo > 0:
         # Usa a divisão de teto para garantir viagens suficientes
-        r_max = -(-total_slots_demanda // min_capacidade_veiculo)
+        r_max = -(-total_slots_demanda // min_capacidade_veiculo)+1
     else:
         r_max = 5 # Fallback para o caso de não haver capacidade
 
@@ -968,4 +968,5 @@ def executar_solver(df_veiculos_selecionados, df_planejamento, df_itens, final_d
     return resultados
 
 # Renomeia a função principal para corresponder à chamada em plan_rota.py
+
 run_optimization = executar_solver

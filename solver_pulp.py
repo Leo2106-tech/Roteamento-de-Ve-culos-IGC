@@ -70,14 +70,30 @@ def preparar_dados_solver(df_veiculos_selecionados, df_planejamento, df_itens):
 
     nos_demanda = {}
     for local, group in df_planejamento.groupby('Local'):
-        servicos_no_local = {}
-        # Verifica se há alguma operação de coleta no local
+        servicos_no_local = {} # Dicionário para [Item]: (Qtd_Total, Prazo_Mais_Urgente)
         tem_coleta = 'Coleta' in group['Tipo_Operacao'].unique()
 
         for _, row in group.iterrows():
+            item = row['Item']
             sinal = 1 if row['Tipo_Operacao'] == 'Entrega' else -1
             prazo_horas = {0: 8.0, 1: 48.0, 2: 168.0}.get(row['Prioridade'], 48.0)
-            servicos_no_local[row['Item']] = (row['Quantidade'] * sinal, prazo_horas)
+            quantidade_atual = row['Quantidade'] * sinal
+
+            # --- INÍCIO DA CORREÇÃO ---
+            # Se este item já foi adicionado para este local, SOME as quantidades
+            if item in servicos_no_local:
+                qtd_existente, prazo_existente = servicos_no_local[item]
+                
+                # Soma as quantidades (ex: 10 + 10 = 20)
+                nova_qtd = qtd_existente + quantidade_atual
+                
+                # Mantém o prazo mais urgente (o menor número)
+                novo_prazo = min(prazo_existente, prazo_horas) 
+                
+                servicos_no_local[item] = (nova_qtd, novo_prazo)
+            else:
+                # Se for a primeira vez, apenas adiciona
+                servicos_no_local[item] = (quantidade_atual, prazo_horas)
         
         # Define o tempo de serviço com base na presença de coleta
         tempo_servico = 2.0 if tem_coleta else 1.0
@@ -367,7 +383,8 @@ def executar_solver(df_veiculos_selecionados, df_planejamento, df_itens, final_d
     ) + 5  # margem pequena
 
     # M_fluxo: usado em restrições de capacidade e fluxo de slots
-    M_fluxo = max(Q_slots.values())
+    total_slots_demanda = df_planejamento['Slots (Total)'].sum()
+    M_fluxo = max(max(Q_slots.values()), total_slots_demanda) + 1
 
     # M_compat: usado para compatibilidade e visita (f <= M * visit)
     # Nesse caso, o máximo possível de unidades de um item por viagem
@@ -378,7 +395,10 @@ def executar_solver(df_veiculos_selecionados, df_planejamento, df_itens, final_d
     M_atraso = max(DL.values()) + M_tempo
 
     # M_operacao: usado em T_total e ativações (U[k])
-    M_operacao = M_tempo * len(V)  # tempo máximo possível de operação
+    R_max_val = dados['R_max']
+    max_ST = max(ST.values()) if ST else 0
+    
+    M_operacao = (M_tempo + max_ST) * len(V) * R_max_val + 5 # Adiciona margem
 
     # --- Exibir para conferência ---
     print("Big-M dinâmicos definidos:")
@@ -616,6 +636,16 @@ def executar_solver(df_veiculos_selecionados, df_planejamento, df_itens, final_d
                 if P.get(k, 1) == 1:
                     model += T_total[k] >= T[(n, k, r)] + ST[n] + t[n][0] - M_operacao * (1 - X.get((n, 0, k, r), 0))
         model += T_total[k] <= M_operacao * U[k]
+    # --- RESTRIÇÃO ADICIONAL (segurança): capacidade por veículo por viagem (slots) ---
+    # evita que, por algum contorno nas F/X/Big-M, um veículo transporte mais slots que sua Q_slots
+    for k in K:
+        for r in R:
+            model += pulp.lpSum(
+                Slots[s] * f[(s, n, k, r)]
+                for (s, n, kk, rr) in f_indices
+                if kk == k and rr == r
+            ) <= Q_slots[k], f"Capacidade_por_viagem_{k}_{r}"
+
 
     # --- Fim das restrições ---
     # --- RESOLUÇÃO COM HIGHS ---

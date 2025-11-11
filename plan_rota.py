@@ -97,15 +97,18 @@ def render(df_veiculos, df_itens):
         placas_selecionadas = [v.split(" (")[0] for v in veiculos_disponiveis]
         df_veiculos_selecionados_info = df_veiculos_selecionaveis[df_veiculos_selecionaveis['PLACA'].isin(placas_selecionadas)].copy()
 
-        # Constantes para o cálculo de slots (replicadas aqui para manter a lógica encapsulada)
-        SLOT_VOLUME_PADRAO = 0.07625644788  # m³
-        SLOT_PESO_PADRAO = 13     # kg
+        # Constantes para o cálculo de slots.
+        # Para os veículos, usamos um divisor menor para AUMENTAR a capacidade de slots.
+        SLOT_VOLUME_VEICULO = 0.06625644788  # m³ (menor que o do item, aumenta slots)
+        SLOT_PESO_VEICULO = 7      # kg (menor que o do item, aumenta slots)
+        # Para os itens, mantemos os valores originais para não alterar a ocupação.
+        SLOT_VOLUME_ITEM = 0.07625644788  # m³
+        SLOT_PESO_ITEM = 13               # kg
 
         # --- NOVA LÓGICA DE SLOTS PARA VEÍCULOS ---
         # Arredondamento para baixo em todas as etapas
-        slots_vol = np.floor(((df_veiculos_selecionados_info['Volume (Litros)'] / 1000) / SLOT_VOLUME_PADRAO)).fillna(0)
-        # Subtrai 100kg da capacidade de peso antes de fracionar
-        slots_peso = np.floor(((df_veiculos_selecionados_info['Peso (Capacidade de carga)'] * 1000) / SLOT_PESO_PADRAO)).fillna(0)
+        slots_vol = np.floor(((df_veiculos_selecionados_info['Volume (Litros)'] / 1000) / SLOT_VOLUME_VEICULO)).fillna(0)
+        slots_peso = np.floor(((df_veiculos_selecionados_info['Peso (Capacidade de carga)'] * 1000) / SLOT_PESO_VEICULO)).fillna(0)
         
         # A capacidade final é a média dos dois, arredondada para baixo.
         df_veiculos_selecionados_info['Capacidade (Slots)'] = np.floor((slots_vol + slots_peso) / 2).astype(int)
@@ -399,14 +402,17 @@ def render(df_veiculos, df_itens):
     # --- NOVA SEÇÃO: VALIDAÇÃO DE ITENS E CÁLCULO DE CUBAGEM (SLOTS) ---
     if veiculos_disponiveis and st.session_state.get('itens_planejamento'):
 
-        # Constantes para o cálculo de slots
-        SLOT_VOLUME_PADRAO = 0.07625644788  # m³
-        SLOT_PESO_PADRAO = 13      # kg
+        # Constantes para o cálculo de slots.
+        # Para os veículos, usamos um divisor menor para AUMENTAR a capacidade de slots.
+        SLOT_VOLUME_VEICULO = 0.06625644788  # m³ (menor que o do item, aumenta slots)
+        SLOT_PESO_VEICULO = 7      # kg (menor que o do item, aumenta slots)
+        # Para os itens, mantemos os valores originais para não alterar a ocupação.
+        SLOT_VOLUME_ITEM = 0.07625644788  # m³
+        SLOT_PESO_ITEM = 13               # kg
 
         # 1. Preparar DataFrames de veículos e planejamento
         placas_selecionadas = [v.split(" (")[0] for v in veiculos_disponiveis]
-        # O df_veiculos recebido pela função JÁ ESTÁ FILTRADO por 'Área'.
-        # Portanto, filtramos apenas pelas placas selecionadas a partir dele.
+        # Filtra os veículos selecionáveis pelas placas escolhidas na UI.
         df_veiculos_selecionados = df_veiculos_selecionaveis[
             df_veiculos_selecionaveis['PLACA'].isin(placas_selecionadas)
         ].copy()
@@ -419,8 +425,8 @@ def render(df_veiculos, df_itens):
 
         # Calcula e adiciona a coluna 'Capacidade (Slots)' ao DataFrame principal
         # --- NOVA LÓGICA DE SLOTS PARA VEÍCULOS (PARA O SOLVER) ---
-        slots_vol_solver = np.floor(((df_veiculos_selecionados['Volume (Litros)'] / 1000) / SLOT_VOLUME_PADRAO)).fillna(0)
-        slots_peso_solver = np.floor(((df_veiculos_selecionados['Peso (Capacidade de carga)'] * 1000) / SLOT_PESO_PADRAO)).fillna(0)
+        slots_vol_solver = np.floor(((df_veiculos_selecionados['Volume (Litros)'] / 1000) / SLOT_VOLUME_VEICULO)).fillna(0)
+        slots_peso_solver = np.floor(((df_veiculos_selecionados['Peso (Capacidade de carga)'] * 1000) / SLOT_PESO_VEICULO)).fillna(0)
         
         # A capacidade final é a média dos dois, arredondada para baixo.
         df_veiculos_selecionados['Capacidade (Slots)'] = np.floor((slots_vol_solver + slots_peso_solver) / 2).astype(int)
@@ -475,10 +481,13 @@ def render(df_veiculos, df_itens):
 
                     # --- NOVA LÓGICA DE SLOTS PARA ITENS ---
                     # Arredondamento para cima (divisão de teto) em todas as etapas
-                    slots_vol_item = -(-volume_unitario // SLOT_VOLUME_PADRAO) if SLOT_VOLUME_PADRAO > 0 else float('inf')
-                    slots_peso_item = -(-peso_unitario // SLOT_PESO_PADRAO) if SLOT_PESO_PADRAO > 0 else float('inf')
+                    slots_vol_item = -(-volume_unitario // SLOT_VOLUME_ITEM) if SLOT_VOLUME_ITEM > 0 else float('inf')
+                    slots_peso_item = -(-peso_unitario // SLOT_PESO_ITEM) if SLOT_PESO_ITEM > 0 else float('inf')
                     # A ocupação final é a média dos dois, arredondada para cima.
-                    slots_por_item[nome_item_tarefa] = -(-(slots_vol_item + slots_peso_item) // 2)
+                    slots_calculado = -(-(slots_vol_item + slots_peso_item) // 2)
+                    
+                    # Garante que todo item ocupe pelo menos 1 slot, mesmo que seja muito pequeno/leve.
+                    slots_por_item[nome_item_tarefa] = max(1, slots_calculado)
 
             # Adiciona as colunas de slots ao DataFrame
             df_planejamento['Slots (Unitário)'] = df_planejamento['Item'].map(slots_por_item).fillna(0).astype(int)
@@ -537,6 +546,11 @@ def render(df_veiculos, df_itens):
         })
         # CORREÇÃO CRÍTICA: Remove linhas que foram deletadas no editor (aparecem com NaN).
         df_planejamento_final.dropna(subset=['Local'], inplace=True)
+
+        # --- ADICIONE ESTA LINHA PARA RECALCULAR O TOTAL ---
+        df_planejamento_final['Slots (Total)'] = df_planejamento_final['Slots (Unitário)'] * df_planejamento_final['Quantidade']
+        # --- FIM DA CORREÇÃO ---
+
         st.session_state.itens_planejamento = df_planejamento_final.to_dict('records')
         # Garante que a variável df_planejamento usada para o solver seja a versão final e completa.
         df_planejamento = df_planejamento_final

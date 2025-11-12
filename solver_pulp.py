@@ -461,15 +461,17 @@ def executar_solver(df_veiculos_selecionados, df_planejamento, df_itens, final_d
     # 2) Itens longos: no máximo 4 unidades do CONJUNTO de itens longos por veículo por viagem (k,r).
     if itens_longos:
         for k in K:
-            for r in R:
-                # Soma a quantidade de TODOS os itens longos transportados nesta viagem por este veículo
-                total_itens_longos_viagem = pulp.lpSum(
-                    f[(s, n, k, r)]
-                    for s in itens_longos
-                    for n in N
-                    if (s, n, k, r) in f
-                )
-                model += total_itens_longos_viagem <= 4, f"Limite_Itens_Longos_{k}_{r}"
+            # A restrição só se aplica a veículos do tipo CAMINHONETE ou PICKUP
+            if dados['veiculos'][k]['CATEGORIA'] in ['CAMINHONETE', 'PICKUP']:
+                for r in R:
+                    # Soma a quantidade de TODOS os itens longos transportados nesta viagem por este veículo
+                    total_itens_longos_viagem = pulp.lpSum(
+                        f[(s, n, k, r)]
+                        for s in itens_longos
+                        for n in N
+                        if (s, n, k, r) in f
+                    )
+                    model += total_itens_longos_viagem <= 4, f"Limite_Itens_Longos_{k}_{r}"
 
     # Capacidade por arco (F ligado a X) - garante que nenhum arco carregue mais slots que Q_slots quando usado
     for (i, j, k, r) in F_indices:
@@ -970,3 +972,4 @@ def executar_solver(df_veiculos_selecionados, df_planejamento, df_itens, final_d
 # Renomeia a função principal para corresponder à chamada em plan_rota.py
 
 run_optimization = executar_solver
+

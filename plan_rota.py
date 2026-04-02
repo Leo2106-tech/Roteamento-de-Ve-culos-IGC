@@ -640,7 +640,7 @@ def render(df_veiculos, df_itens):
         elif veiculos_nao_retornam and len(final_destinos_nao_retornam) != len(veiculos_nao_retornam):
             st.error("Por favor, selecione um destino final para todos os veículos que ficam em campo.")
         else:
-            with st.spinner("Executando o solver, isso pode levar até 15 minutos..."):
+            with st.spinner("Executando o solver, isso pode levar até 30 minutos..."):
                 st.session_state.resultados_otimizacao = solver_pulp.run_optimization(
                     df_veiculos_selecionados,
                     df_planejamento,

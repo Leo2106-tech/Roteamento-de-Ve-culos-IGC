@@ -606,7 +606,7 @@ def executar_solver(
 
     solver = pulp.HiGHS(
         msg=True,
-        timeLimit=900,
+        timeLimit=1800,
         gapRel=0.0005,
         threads=0,
         presolve="on",

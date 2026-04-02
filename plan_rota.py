@@ -34,6 +34,12 @@ def render(df_veiculos, df_itens):
     st.title("🚚 Gerenciamento de Rotas")
     st.markdown("---")
 
+    #st.info(
+       # "Premissas atuais da formulação híbrida: o estoque por nó $S_{im}$ ainda não é informado pela ferramenta. "
+        #"Por isso, o app assume $S_{im}=0$ para todos os nós diferentes do CD e estoque muito alto no nó 0 (CD). "
+        #"As coletas continuam com origem e destino fixos."
+   # )
+
     st.header("1. Seleção de Veículos")
 
     # Filtra o DataFrame para obter apenas os veículos relevantes para o planejamento (IGC, não PIPA)
@@ -67,26 +73,22 @@ def render(df_veiculos, df_itens):
     # NEW: Seleção de destino final para veículos que não retornam
     final_destinos_nao_retornam = {} # Inicializa o dicionário de destinos finais
     if veiculos_nao_retornam:
-        st.subheader("Destino Final para Veículos que Ficam em Campo")
-        # Só mostra a seleção de destino se houver itens para planejar (e, portanto, locais de demanda)
-        if st.session_state.get('itens_planejamento'):
-            df_planejamento_temp = pd.DataFrame(st.session_state.itens_planejamento)
-            locais_demanda_para_destino = df_planejamento_temp['Local'].unique().tolist()
-            if not locais_demanda_para_destino:
-                st.warning("Adicione itens para que os veículos que ficam em campo possam ter um destino final.")
-            else:
-                for veiculo_str in veiculos_nao_retornam:
-                    veiculo_placa = veiculo_str.split(" (")[0]
-                    selected_destino = st.selectbox(
-                        f"Destino final para {veiculo_placa}:",
-                        options=[''] + locais_demanda_para_destino, # Adiciona opção vazia para desmarcar
-                        key=f"destino_final_{veiculo_placa}",
-                        help=f"Selecione o local onde o veículo {veiculo_placa} deve finalizar sua rota."
-                    )
-                    if selected_destino: # Só adiciona se um destino foi realmente selecionado
-                        final_destinos_nao_retornam[veiculo_placa] = selected_destino
-        else:
-            st.info("Adicione itens para definir destinos finais para veículos que ficam em campo.")
+        # Usamos um expander para organizar melhor a UI e chamar atenção para esta etapa.
+        with st.expander("📍 Definir Destinos Finais (Obrigatório para Veículos em Campo)", expanded=True):
+            st.info("Para cada veículo que não retorna ao CD, você deve informar o endereço onde ele encerrará a rota.")
+            for veiculo_str in veiculos_nao_retornam:
+                veiculo_placa = veiculo_str.split(" (")[0]
+                # Usamos st.text_input em vez de st.selectbox
+                destino_texto = st.text_input(
+                    f"Endereço de destino final para {veiculo_str}:",
+                    key=f"destino_final_{veiculo_placa}",
+                    help=f"Digite o endereço onde o veículo {veiculo_str} deve finalizar sua rota. Ex: 'Rua Exemplo, 123, Cidade'. Este campo é obrigatório."
+                )
+                if destino_texto.strip(): # Só adiciona se um destino foi realmente digitado
+                    final_destinos_nao_retornam[veiculo_placa] = destino_texto
+                else:
+                    # Adiciona um aviso se o campo estiver vazio para reforçar a obrigatoriedade
+                    st.warning(f"O destino final para o veículo {veiculo_str} é obrigatório.")
 
     if not veiculos_disponiveis:
         st.warning("Por favor, selecione ao menos um veículo para continuar.")
@@ -158,6 +160,7 @@ def render(df_veiculos, df_itens):
         # 1. Widgets de controle fora do formulário para não serem limpos na submissão
         st.markdown("##### 1. Defina o Local e o Tipo de Operação")
         local = st.text_input("Local de Entrega/Coleta (Endereço ou Obra)", key="local_tarefa")
+        local_entrega_coleta = "" # Inicializa a variável
         tipo_operacao = st.radio("Tipo de Operação", ("Entrega", "Coleta"), horizontal=True, key="tipo_operacao_manual")
 
         # 2. O formulário agora contém apenas os campos do item a ser adicionado.
@@ -185,10 +188,15 @@ def render(df_veiculos, df_itens):
                     "Coleta de Amostra Denison",
                     "Coleta de Bloco",
                     "Coleta de Trado",
-                    "Coleta de Shelbi"
+                    "Coleta de Shelbi",
+                    "Pessoas"
                 ]
                 item_selecionado = st.selectbox("Tipo de Coleta", options=tipos_de_coleta)
                 quantidade = st.number_input("Quantidade", min_value=1, step=1, key="qtd_coleta")
+                # NOVO: Campo para o destino da coleta
+                local_entrega_coleta = st.text_input(
+                    "Local de Entrega da Coleta", key="local_entrega_coleta",
+                    help="Informe o endereço para onde o material coletado deve ser levado. Ex: 'CD' ou outro endereço.")
 
             st.markdown("---")
             # O format_func mostra o texto amigável, mas o valor retornado é o número (0, 1, ou 2)
@@ -202,22 +210,35 @@ def render(df_veiculos, df_itens):
             submitted = st.form_submit_button("Adicionar Item à Lista")
 
             # 3. Lógica de geocodificação na submissão do formulário
-            if submitted and local:
+            if submitted and local and (tipo_operacao == "Entrega" or (tipo_operacao == "Coleta" and local_entrega_coleta)):
                 try:
                     # Inicializa o geolocator do OpenCage com a chave dos secrets
                     api_key = st.secrets["opencage"]["api_key"]
                     geolocator = OpenCage(api_key, user_agent="chammas_route_planner_v1")
-                    location = geocode_with_retry(geolocator, local)
                     
-                    if not location:
+                    # Geocodifica o local de origem
+                    location_origem = geocode_with_retry(geolocator, local)
+                    if not location_origem:
                         st.error(f"Endereço não encontrado para '{local}'. Verifique o endereço ou tente novamente.")
                         st.stop()
+
+                    # Geocodifica o local de destino da coleta, se aplicável
+                    location_destino = None
+                    if tipo_operacao == "Coleta":
+                        if local_entrega_coleta.upper() == "CD":
+                             # Define coordenadas fixas para o CD para evitar geocodificação desnecessária
+                            location_destino = type('obj', (object,), {'latitude': -19.940308, 'longitude': -44.012487})()
+                        else:
+                            location_destino = geocode_with_retry(geolocator, local_entrega_coleta)
+                        if not location_destino:
+                            st.error(f"Endereço de entrega da coleta não encontrado para '{local_entrega_coleta}'. Verifique o endereço.")
+                            st.stop()
 
                     tarefas_adicionadas = 0
                     if tipo_operacao == "Entrega":
                         if quantidade > 0:
                             nova_tarefa = {
-                                "Local": local, "Latitude": location.latitude, "Longitude": location.longitude,
+                                "Local": local, "Latitude": location_origem.latitude, "Longitude": location_origem.longitude,
                                 "Tipo_Operacao": "Entrega", "Item": item_selecionado,
                                 "Quantidade": quantidade, "Peso_Unitario_kg": round(peso_item, 2),
                                 "Prioridade": prioridade_selecionada,
@@ -225,7 +246,8 @@ def render(df_veiculos, df_itens):
                                 # Debug: Imprime o valor de df_itens antes da busca
                                 #st.write("df_itens.columns:", df_itens.columns)
                                 #st.write("df_itens['Código Mega']:", df_itens['Código Mega'])
-                                "Código": df_itens.loc[df_itens['Nomes Normalizados'] == item_selecionado, 'Código Mega'].iloc[0]
+                                "Código": df_itens.loc[df_itens['Nomes Normalizados'] == item_selecionado, 'Código Mega'].iloc[0],
+                                "Destino_Coleta": None, "Lat_Destino": None, "Lon_Destino": None # Campos nulos para entrega
                             }
                             st.session_state.itens_planejamento.append(nova_tarefa)
                             tarefas_adicionadas += 1
@@ -239,14 +261,19 @@ def render(df_veiculos, df_itens):
                                 "Coleta de Shelbi": ("CAIXA DE MADEIRA PARA TRANSPORTE DE AMOSTRA DENISON 1,22X0,50X0,14", 6.0),
                             }
                             try:
-                                nome_item_base, peso_adicional = coletas_config[item_selecionado]
-                                peso_base = df_itens.loc[df_itens['Nomes Normalizados'] == nome_item_base, 'Peso (KG)'].iloc[0]
-                                peso_final = peso_base + peso_adicional
+                                if item_selecionado == "Pessoas":
+                                    peso_final = 0.0
+                                else:
+                                    nome_item_base, peso_adicional = coletas_config[item_selecionado]
+                                    peso_base = df_itens.loc[df_itens['Nomes Normalizados'] == nome_item_base, 'Peso (KG)'].iloc[0]
+                                    peso_final = peso_base + peso_adicional
                                 nova_tarefa = {
-                                    "Local": local, "Latitude": location.latitude, "Longitude": location.longitude, "Tipo_Operacao": "Coleta", 
+                                    "Local": local, "Latitude": location_origem.latitude, "Longitude": location_origem.longitude,
+                                    "Tipo_Operacao": "Coleta", 
                                     "Item": item_selecionado, "Quantidade": quantidade, "Peso_Unitario_kg": round(peso_final, 2),
                                     "Prioridade": prioridade_selecionada,
-                                    "Código": "N/A" # Coletas não possuem código de item
+                                    "Código": "N/A", # Coletas não possuem código de item
+                                    "Destino_Coleta": local_entrega_coleta, "Lat_Destino": location_destino.latitude, "Lon_Destino": location_destino.longitude
                                 }
                                 st.session_state.itens_planejamento.append(nova_tarefa)
                                 tarefas_adicionadas += 1
@@ -258,6 +285,8 @@ def render(df_veiculos, df_itens):
 
                 except (GeocoderTimedOut, GeocoderUnavailable):
                     st.error("Serviço de geocodificação indisponível. Tente novamente mais tarde.")
+            elif submitted:
+                st.warning("Por favor, preencha todos os campos obrigatórios (Local e Destino da Coleta, se aplicável).")
 
     else:
         # Exibe mensagens de importação salvas no session_state, se houver
@@ -285,10 +314,11 @@ def render(df_veiculos, df_itens):
         st.info(
             """
             **O arquivo Excel deve conter as seguintes colunas:**
-            - **Local**: O endereço completo ou nome da obra para entrega/coleta.
+            - **Local**: O endereço completo ou nome da obra para entrega ou **origem da coleta**.
             - **Tipo_Operacao**: O tipo de operação. Deve ser exatamente **'Entrega'** ou **'Coleta'**.
             - **Item**: O nome do item. Para entregas, deve corresponder a um item na base de dados. Para coletas, deve ser um tipo de coleta válido (ex: 'Coleta de Testemunho').
             - **Quantidade**: Um número inteiro representando a quantidade de itens.
+            - **Destino_Coleta**: O endereço de **destino da coleta**. Obrigatório se `Tipo_Operacao` for 'Coleta'. Pode ser 'CD'. Deixe em branco para entregas.
             - **Prioridade**: Um número para a urgência: **0** (prazo de 8h), **1** (prazo de 48h) ou **2** (prazo de 168h).
             """
         )
@@ -297,7 +327,7 @@ def render(df_veiculos, df_itens):
         if arquivo_excel and arquivo_excel.file_id != st.session_state.arquivo_processado:
             try:
                 df_import = pd.read_excel(arquivo_excel)
-                colunas_necessarias = ['Local', 'Tipo_Operacao', 'Item', 'Quantidade', 'Prioridade']
+                colunas_necessarias = ['Local', 'Tipo_Operacao', 'Item', 'Quantidade', 'Prioridade', 'Destino_Coleta']
                 if not all(col in df_import.columns for col in colunas_necessarias):
                     st.error(f"O arquivo Excel deve conter as colunas: {', '.join(colunas_necessarias)}")
                     st.stop()
@@ -324,6 +354,7 @@ def render(df_veiculos, df_itens):
                         item = row['Item']
                         qtd = row['Quantidade']
                         prioridade = row['Prioridade']
+                        destino_coleta = row['Destino_Coleta']
 
                         # Validação da Prioridade
                         if prioridade not in [0, 1, 2]:
@@ -331,6 +362,7 @@ def render(df_veiculos, df_itens):
                             continue
 
                         # 1. Geocodificação com cache
+                        # Geocodifica local de origem
                         if local not in geocoded_locations:
                             try:
                                 location = geocode_with_retry(geolocator, local) # A função de retry continua sendo usada
@@ -338,43 +370,66 @@ def render(df_veiculos, df_itens):
                             except Exception: # Captura qualquer outra exceção inesperada
                                 erros_importacao.append(f"Linha {index + 2}: Falha na conexão com o serviço de geocodificação para o local '{local}'.")
                                 continue
-                        
-                        location = geocoded_locations[local]
-                        if not location:
+                        location_origem = geocoded_locations[local]
+                        if not location_origem:
                             erros_importacao.append(f"Linha {index + 2}: Endereço não encontrado ou serviço indisponível para '{local}'.")
                             continue
+
+                        # Geocodifica destino da coleta, se houver
+                        location_destino = None
+                        if pd.notna(destino_coleta) and str(destino_coleta).strip() != "":
+                            if str(destino_coleta).upper() == "CD":
+                                geocoded_locations["CD"] = type('obj', (object,), {'latitude': -19.940308, 'longitude': -44.012487})()
+                            
+                            if destino_coleta not in geocoded_locations:
+                                try:
+                                    location_dest = geocode_with_retry(geolocator, destino_coleta)
+                                    geocoded_locations[destino_coleta] = location_dest
+                                except Exception:
+                                    erros_importacao.append(f"Linha {index + 2}: Falha na conexão para o destino '{destino_coleta}'.")
+                                    continue
+                            location_destino = geocoded_locations[destino_coleta]
+                            if not location_destino:
+                                erros_importacao.append(f"Linha {index + 2}: Destino da coleta '{destino_coleta}' não encontrado.")
+                                continue
 
                         # 2. Validação e cálculo de peso
                         peso_unitario = 0
                         if tipo_op == "Entrega":
                             codigo_item = "N/A"
                             item_data = df_itens[df_itens['Nomes Normalizados'] == item]
-                            #st.write("df_itens.columns:", df_itens.columns)
                             if item_data.empty:
                                 erros_importacao.append(f"Linha {index + 2}: Item de entrega '{item}' não encontrado na base de dados.")
                                 continue
                             peso_unitario = item_data['Peso (KG)'].iloc[0]
                             codigo_item = item_data['Código Mega'].iloc[0]
                         elif tipo_op == "Coleta":
-                            if item not in coletas_config:
-                                erros_importacao.append(f"Linha {index + 2}: Tipo de coleta '{item}' é inválido.")
-                                continue
-                            nome_item_base, peso_adicional = coletas_config[item]
-                            item_data = df_itens[df_itens['Nomes Normalizados'] == nome_item_base]
-                            if item_data.empty:
-                                erros_importacao.append(f"Linha {index + 2}: Item base '{nome_item_base}' para a coleta '{item}' não encontrado na base de dados.")
-                                continue
-                            peso_unitario = item_data['Peso (KG)'].iloc[0] + peso_adicional
-                            codigo_item = "N/A" # Coletas não possuem código de item
+                            if item == "Pessoas":
+                                peso_unitario = 0.0
+                                codigo_item = "N/A"
+                            else:
+                                if item not in coletas_config:
+                                    erros_importacao.append(f"Linha {index + 2}: Tipo de coleta '{item}' é inválido.")
+                                    continue
+                                nome_item_base, peso_adicional = coletas_config[item]
+                                item_data = df_itens[df_itens['Nomes Normalizados'] == nome_item_base]
+                                if item_data.empty:
+                                    erros_importacao.append(f"Linha {index + 2}: Item base '{nome_item_base}' para a coleta '{item}' não encontrado na base de dados.")
+                                    continue
+                                peso_unitario = item_data['Peso (KG)'].iloc[0] + peso_adicional
+                                codigo_item = "N/A" # Coletas não possuem código de item
                         else:
                             erros_importacao.append(f"Linha {index + 2}: Tipo de Operação '{tipo_op}' inválido. Use 'Entrega' ou 'Coleta'.")
                             continue
 
                         # 3. Adicionar tarefa se tudo estiver correto
                         novas_tarefas.append({
-                            "Local": local, "Latitude": location.latitude, "Longitude": location.longitude,
+                            "Local": local, "Latitude": location_origem.latitude, "Longitude": location_origem.longitude,
                             "Tipo_Operacao": tipo_op, "Item": item, "Quantidade": qtd, 
-                            "Peso_Unitario_kg": round(peso_unitario, 2), "Prioridade": prioridade, "Código": codigo_item
+                            "Peso_Unitario_kg": round(peso_unitario, 2), "Prioridade": prioridade, "Código": codigo_item,
+                            "Destino_Coleta": destino_coleta if location_destino else None,
+                            "Lat_Destino": location_destino.latitude if location_destino else None,
+                            "Lon_Destino": location_destino.longitude if location_destino else None
                         })
 
                 # Limpa mensagens antigas antes de adicionar novas
@@ -453,6 +508,13 @@ def render(df_veiculos, df_itens):
         if not df_planejamento.empty:
             for nome_item_tarefa in df_planejamento['Item'].unique():
                 compatibilidade_debug[nome_item_tarefa] = {}
+
+                if str(nome_item_tarefa).strip().upper() == "PESSOAS":
+                    for _, veiculo_row in df_veiculos_selecionados.iterrows():
+                        compatibilidade_debug[nome_item_tarefa][veiculo_row['PLACA']] = True
+                    slots_por_item[nome_item_tarefa] = 7
+                    continue
+
                 nome_item_lookup = mapa_coleta_item_base.get(nome_item_tarefa, nome_item_tarefa)
                 dados_item = df_itens[df_itens['Nomes Normalizados'] == nome_item_lookup]
 
@@ -514,7 +576,7 @@ def render(df_veiculos, df_itens):
             use_container_width=True,
             num_rows="dynamic", # Permite a exclusão de linhas. A adição de novas linhas pela tabela é visual, mas não é salva.
             # Define a ordem e visibilidade das colunas. As colunas não listadas aqui são ocultadas.
-            column_order=['Local', 'Tipo_Operacao', 'Item', 'Código', 'Quantidade', 'Peso (kg)', 'Slots', 'Prioridade', 'Latitude', 'Longitude'],
+            column_order=['Local', 'Destino_Coleta', 'Tipo_Operacao', 'Item', 'Código', 'Quantidade', 'Peso (kg)', 'Slots', 'Prioridade'],
             column_config={
                 "Quantidade": st.column_config.NumberColumn(
                     "Quantidade",
@@ -525,14 +587,13 @@ def render(df_veiculos, df_itens):
                 ),
                 # Desabilita a edição de outras colunas para evitar inconsistências
                 "Local": st.column_config.TextColumn(disabled=True),
+                "Destino_Coleta": st.column_config.TextColumn(disabled=True, help="Destino final do material coletado."),
                 "Tipo_Operacao": st.column_config.TextColumn(disabled=True),
                 "Item": st.column_config.TextColumn(disabled=True),
                 "Código": st.column_config.TextColumn(disabled=True),
                 "Peso (kg)": st.column_config.NumberColumn(disabled=True),
                 "Slots": st.column_config.NumberColumn(disabled=True),
                 "Prioridade": st.column_config.NumberColumn(disabled=True),
-                "Latitude": st.column_config.NumberColumn(disabled=True),
-                "Longitude": st.column_config.NumberColumn(disabled=True),
             },
             hide_index=True
         )
@@ -579,127 +640,81 @@ def render(df_veiculos, df_itens):
         elif veiculos_nao_retornam and len(final_destinos_nao_retornam) != len(veiculos_nao_retornam):
             st.error("Por favor, selecione um destino final para todos os veículos que ficam em campo.")
         else:
-            with st.spinner("Preparando dados e executando o algoritmo de otimização... Isso pode levar até 10 minutos."):
-                # Chama a função principal do solver, que agora lida com a preparação e execução
-                # Armazena os resultados no estado da sessão para que não se percam em recarregamentos
-                st.session_state.resultados_otimizacao = solver_pulp.run_optimization(df_veiculos_selecionados, df_planejamento, df_itens, final_destinos_nao_retornam=final_destinos_nao_retornam)
+            with st.spinner("Executando o solver, isso pode levar até 15 minutos..."):
+                st.session_state.resultados_otimizacao = solver_pulp.run_optimization(
+                    df_veiculos_selecionados,
+                    df_planejamento,
+                    df_itens,
+                    final_destinos_nao_retornam=final_destinos_nao_retornam,
+                )
 
-    # --- Seção de Exibição de Resultados ---
-    # Esta seção agora é executada fora do bloco do botão, usando os resultados salvos no estado da sessão.
-    # Isso garante que os resultados permaneçam na tela mesmo quando outros widgets (como o data_editor) causam um recarregamento.
     if 'resultados_otimizacao' in st.session_state and st.session_state.resultados_otimizacao:
         resultados = st.session_state.resultados_otimizacao
-        try:
-            st.header("Resultados do Planejamento")
-            if resultados and resultados["status"] == "Optimal":
-                # Inicializa o estado para armazenar os dados de separação editados
-                if 'dados_separacao_editados' not in st.session_state:
-                    st.session_state.dados_separacao_editados = {}
-                if 'active_expander' not in st.session_state:
-                    st.session_state.active_expander = None
-                st.success("Otimização concluída com sucesso!")
-                
-                st.subheader("Custos da Operação")
-                custos = resultados.get("custos_detalhados", {})
-                col1, col2, col3, col4, col5 = st.columns(5)
-                col1.metric("Custo Total", f"R$ {resultados.get('custo_total', 0):.2f}", help="Soma de todos os custos (Fixo + Variável + Penalidades).")
-                col2.metric("Custo Fixo", f"R$ {custos.get('Custo Fixo (Veículos)', 0):.2f}", help="Custo de locação e motorista para os veículos utilizados.")
-                col3.metric("Custo Variável", f"R$ {custos.get('Custo Variável (Distância)', 0):.2f}", help="Custo relacionado à distância percorrida.")
-                col4.metric("Penalidade (Entregas)", f"R$ {custos.get('Custo Penalidade (Entregas)', 0):.2f}", help="Custo por atraso na entrega de itens.")
-                col5.metric("Penalidade (Coletas)", f"R$ {custos.get('Custo Penalidade (Coletas)', 0):.2f}", help="Custo por atraso na coleta de amostras.")
+        st.header("Resultados do Planejamento")
+        if resultados.get("status") not in ["Optimal", "Feasible"]:
+            st.error(resultados.get("mensagem", f"Solver sem solução viável. Status: {resultados.get('status', 'Desconhecido')}"))
+            return
 
-                st.subheader("Rotas Planejadas")
-                for veiculo, viagens in resultados.get("rotas", {}).items():
-                    # Função para definir o expander ativo quando o usuário interage com a tabela
-                    def set_active_expander(vehicle_name):
-                        st.session_state.active_expander = vehicle_name
+        if resultados.get("status") == "Optimal":
+            st.success("Solução ótima encontrada para a formulação híbrida.")
+        else:
+            st.warning("Solução viável encontrada. O modelo foi resolvido, mas sem prova de otimalidade dentro do limite do solver.")
 
-                    # O expander agora verifica se ele é o "ativo" para se manter aberto
-                    is_expanded = (st.session_state.active_expander == veiculo)
-                    with st.expander(f"Veículo: {veiculo}", expanded=is_expanded):
-                        # Se o usuário clicar no expander, ele se torna o ativo
-                        if not is_expanded and st.button("Manter Aberto", key=f"btn_exp_{veiculo}", help="Clique para manter esta seção aberta ao editar as quantidades."):
-                            st.session_state.active_expander = veiculo
-                            st.rerun()
+        resumo = resultados.get("summary", {})
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Objetivo", f"R$ {resultados.get('objective_value', 0):,.2f}")
+        c2.metric("Veículos utilizados", resumo.get("veiculos_utilizados", 0))
+        c3.metric("Viagens utilizadas", resumo.get("viagens_utilizadas", 0))
+        c4.metric("Distância total", f"{resumo.get('distancia_total_km', 0):,.2f} km")
 
-                        for i, viagem in enumerate(viagens):
-                            st.markdown(f"**Viagem {i+1}:** {viagem['rota_str']}")
-                            st.markdown(f"Partida do CD às **{viagem['partida_cd_str']}**")
-                            for no in viagem['detalhes_nos']:
-                                st.write(f"📍 **{no['local']}**")
-                                st.write(f"&nbsp;&nbsp;&nbsp;&nbsp;Distância percorrida no trecho: **{no.get('distancia_km', 0):.2f} km**")
-                                st.write(f"&nbsp;&nbsp;&nbsp;&nbsp;Chegada: **{no['chegada_str']}** | Saída: **{no['saida_str']}**")
-                                for servico_info in no['servicos']:
-                                    descricao = servico_info['descricao']
-                                    atraso = servico_info['atraso_h']
-                                    if atraso > 1e-5: # Se houver atraso significativo
-                                        st.caption(f"&nbsp;&nbsp;&nbsp;&nbsp;↳ {descricao}  <span style='color:red; font-weight:bold;'>(Atraso: {atraso:.2f}h)</span>", unsafe_allow_html=True)
-                                    else:
-                                        st.caption(f"&nbsp;&nbsp;&nbsp;&nbsp;↳ {descricao}")
-                            
-                            # Prepara os dados e exibe a tabela de separação para a viagem
-                            dados_excel_viagem = viagem.get("dados_excel", [])
-                            if dados_excel_viagem:
-                                st.markdown("##### Itens para Separação (Viagem " + str(i+1) + ")")
-                                
-                                # Cria uma chave única para cada tabela de separação
-                                chave_tabela = f"separacao_{veiculo}_{i}"
-
-                                df_para_excel = pd.DataFrame(dados_excel_viagem)
-                                # Adiciona a coluna 'Quantidade Separada' e inicializa com 0
-                                df_para_excel['Quantidade Separada'] = 0
-                                # Reordena as colunas
-                                df_para_excel = df_para_excel[['Veículo', 'Local', 'Previsão de Chegada', 'Item', 'Código', 'Quantidade', 'Quantidade Separada']]
-                                
-                                # Usa st.data_editor para permitir a edição da coluna 'Quantidade Separada'
-                                st.session_state.dados_separacao_editados[chave_tabela] = st.data_editor(
-                                    df_para_excel, # Passa o DataFrame inicial
-                                    key=chave_tabela, # Chave para manter o estado da tabela
-                                    # Quando a tabela é editada, definimos este expander como o ativo
-                                    on_change=set_active_expander, args=(veiculo,),
-                                    hide_index=True,
-                                    use_container_width=True,
-                                    column_config={
-                                        "Quantidade Separada": st.column_config.NumberColumn(
-                                            "Quantidade Separada",
-                                            help="Informe a quantidade de itens que foram separados para esta entrega.",
-                                            min_value=0,
-                                            step=1,
-                                            required=True,
-                                        ),
-                                        # Desabilita a edição das outras colunas para manter a integridade
-                                        "Veículo": st.column_config.TextColumn(disabled=True),
-                                        "Local": st.column_config.TextColumn(disabled=True),
-                                        "Previsão de Chegada": st.column_config.TextColumn(disabled=True),
-                                        "Item": st.column_config.TextColumn(disabled=True),
-                                        "Código": st.column_config.TextColumn(disabled=True),
-                                        "Quantidade": st.column_config.NumberColumn(disabled=True),
-                                    }
-                                )
-
-                st.subheader("Cronograma Gráfico") # Renomeado para refletir apenas o Gantt
-                if resultados.get("caminho_gantt"):
-                    st.image(resultados["caminho_gantt"], caption="Cronograma das Operações (Gantt)")
-
-                # Botão para baixar o relatório compilado
-                # CORREÇÃO: O botão deve aparecer sempre que houver resultados, não apenas após a edição.
-                # A lógica agora verifica se o estado de edição foi inicializado, o que acontece
-                # assim que as tabelas são exibidas pela primeira vez.
-                if 'dados_separacao_editados' in st.session_state:
-                    # Compila todos os dataframes editados em um só
-                    df_relatorio_final = pd.concat(st.session_state.dados_separacao_editados.values(), ignore_index=True)
-                    
-                    # Converte o DataFrame para CSV em memória, que não requer bibliotecas extras
-                    csv_bytes = df_relatorio_final.to_csv(index=False, sep=';', decimal=',').encode('utf-8-sig')
-
-                    st.download_button(
-                        label="📥 Baixar Relatório de Separação",
-                        data=csv_bytes,
-                        file_name="relatorio_separacao_compilado.csv",
-                        mime="text/csv",
-                        use_container_width=True
-                    )
+        gap_pct = resultados.get("mip_gap_pct")
+        if gap_pct is not None:
+            if gap_pct < 1.0:
+                st.success(f"Gap do solver: {gap_pct:.2f}% (ótimo)")
             else:
-                st.error(f"Não foi possível encontrar uma solução ótima. Status do solver: {resultados.get('status', 'Desconhecido')}")
-        except Exception as e:
-            st.error(f"Ocorreu um erro ao exibir os resultados: {e}")
+                st.warning(f"Gap do solver: {gap_pct:.2f}%")
+
+        st.subheader("Demandas livres e estoque parametrizado")
+        st.caption("Na versão atual, a ferramenta considera estoque infinito no galpão.")
+        if isinstance(resultados.get("demands_table"), pd.DataFrame) and not resultados["demands_table"].empty:
+            st.dataframe(resultados["demands_table"], use_container_width=True, hide_index=True)
+
+        st.subheader("Coletas pareadas")
+        if isinstance(resultados.get("pairs_table"), pd.DataFrame) and not resultados["pairs_table"].empty:
+            st.dataframe(resultados["pairs_table"], use_container_width=True, hide_index=True)
+        else:
+            st.info("Não há coletas pareadas nesta execução.")
+
+        st.subheader("Rotas por veículo e viagem")
+        route_tables = resultados.get("route_tables", [])
+        if not route_tables:
+            st.warning("O solver retornou solução sem rotas detalhadas extraídas.")
+        else:
+            for route in route_tables:
+                titulo = f"Veículo {route['vehicle']} - Viagem {route['trip']} - {route['distance_km']:.2f} km"
+                with st.expander(titulo, expanded=False):
+                    st.dataframe(route["data"], use_container_width=True, hide_index=True)
+                    csv_bytes = route["data"].to_csv(index=False, sep=';', decimal=',').encode('utf-8-sig')
+                    st.download_button(
+                        label=f"📥 Baixar CSV da rota {route['vehicle']}-V{route['trip']}",
+                        data=csv_bytes,
+                        file_name=f"rota_{route['vehicle']}_viagem_{route['trip']}.csv",
+                        mime="text/csv",
+                        key=f"download_{route['vehicle']}_{route['trip']}",
+                        use_container_width=True,
+                    )
+
+            df_all = pd.concat([r["data"] for r in route_tables], ignore_index=True)
+            csv_all = df_all.to_csv(index=False, sep=';', decimal=',').encode('utf-8-sig')
+            st.download_button(
+                label="📥 Baixar relatório consolidado das rotas",
+                data=csv_all,
+                file_name="rotas_hibridas_consolidadas.csv",
+                mime="text/csv",
+                key="download_rotas_consolidadas",
+                use_container_width=True,
+            )
+
+        st.subheader("Mapa das rotas")
+        if resultados.get("routes_map_bytes"):
+            st.image(resultados["routes_map_bytes"], caption="Mapa simplificado das rotas planejadas")

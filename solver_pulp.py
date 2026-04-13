@@ -212,7 +212,7 @@ def preparar_dados_solver(
                         slots_total=float(SLOTS_POR_PESSOA),
                         slots_unit=float(SLOTS_POR_PESSOA),
                         prazo_horas=prazo_horas,
-                        service_time_h=1.0,
+                        service_time_h=2.0,
                         is_long=False,
                         pair_id=pair_id,
                         original_index=idx,
@@ -232,7 +232,7 @@ def preparar_dados_solver(
                         slots_total=float(SLOTS_POR_PESSOA),
                         slots_unit=float(SLOTS_POR_PESSOA),
                         prazo_horas=prazo_horas,
-                        service_time_h=1.0,
+                        service_time_h=2.0,
                         is_long=False,
                         pair_id=pair_id,
                         original_index=idx,
@@ -266,7 +266,7 @@ def preparar_dados_solver(
                     slots_total=float(slots_total),
                     slots_unit=float(slots_unit),
                     prazo_horas=prazo_horas,
-                    service_time_h=1.0,
+                    service_time_h=2.0,
                     is_long=item_longo,
                     pair_id=pair_id,
                     original_index=idx,
@@ -286,7 +286,7 @@ def preparar_dados_solver(
                     slots_total=float(slots_total),
                     slots_unit=float(slots_unit),
                     prazo_horas=prazo_horas,
-                    service_time_h=1.0,
+                    service_time_h=2.0,
                     is_long=item_longo,
                     pair_id=pair_id,
                     original_index=idx,
@@ -388,6 +388,9 @@ def executar_solver(
     people_load0 = pulp.LpVariable.dicts("people_load0", (vehicles, trips), lowBound=0)
     people_load = pulp.LpVariable.dicts("people_load", (node_ids, vehicles, trips), lowBound=0)
 
+    CUSTO_ATRASO_ENTREGA = 1334.72
+    CUSTO_ATRASO_COLETA = 1
+
     # Objetivo
     prob += (
         #pulp.lpSum(dados["vehicles"][k]["custo_fixo"] * u[k] for k in vehicles)
@@ -400,7 +403,15 @@ def executar_solver(
             for k in vehicles
             for r in trips
         )
-        + pulp.lpSum(1334.72 * late[n][k][r] for n in node_ids for k in vehicles for r in trips)
+        + pulp.lpSum(
+            (
+                CUSTO_ATRASO_ENTREGA if node_by_id[n].service_type == "delivery"
+                else CUSTO_ATRASO_COLETA
+            ) * late[n][k][r]
+            for n in node_ids
+            for k in vehicles   
+            for r in trips
+        )
     )
 
     # Sem auto-arco
@@ -606,10 +617,9 @@ def executar_solver(
 
     solver = pulp.HiGHS(
         msg=True,
-        timeLimit=1800,
+        timeLimit=3600,
         gapRel=0.0005,
         threads=0,
-        presolve="on",
         parallel="on",
     )
     prob.solve(solver)
